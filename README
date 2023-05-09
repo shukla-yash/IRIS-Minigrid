@@ -1,5 +1,0 @@
-To start training,
-
-```python src/main.py common.device=cuda:0 wandb.mode=online```
-
-

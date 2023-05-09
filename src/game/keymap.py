@@ -16,8 +16,6 @@ def get_keymap_and_action_names(name):
     assert name.startswith('atari/')
     env_id = name.split('atari/')[1]
     action_names = [x.lower() for x in gym.make(env_id).get_action_meanings()]
-    # action_names = [x.lower() for x in ['LEFT', 'RIGHT']]
-
     keymap = {}
     for key, value in ATARI_KEYMAP.items():
         if ATARI_ACTION_NAMES[value] in action_names:

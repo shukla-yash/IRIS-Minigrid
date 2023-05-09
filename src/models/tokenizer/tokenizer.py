@@ -11,7 +11,7 @@ import torch.nn as nn
 
 from dataset import Batch
 from .lpips import LPIPS
-from .nets import Encoder, Decoder
+from .nets2 import Encoder, Decoder, Dictionary
 from utils import LossWithIntermediateLosses
 
 
@@ -23,16 +23,27 @@ class TokenizerEncoderOutput:
 
 
 class Tokenizer(nn.Module):
-    def __init__(self, vocab_size: int, embed_dim: int, encoder: Encoder, decoder: Decoder, with_lpips: bool = True) -> None:
+    def __init__(self, vocab_size: int, embed_dim: int, with_lpips: bool = True) -> None:
         super().__init__()
         self.vocab_size = vocab_size
-        self.encoder = encoder
-        self.pre_quant_conv = torch.nn.Conv2d(encoder.config.z_channels, embed_dim, 1)
+        self.learned_dict = Dictionary(512,
+                                  (64 // 2*2,
+                                  64 // 2*2),
+                                  4, bottleneck_size=128)        
+        self.encoder_decoder_model = Decoder(learned_dict=self.learned_dict)
+        # self.encoder = encoder
+        self.pre_quant_conv = torch.nn.Conv2d(16, embed_dim, 1) # Changed 512 to 16
         self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.post_quant_conv = torch.nn.Conv2d(embed_dim, decoder.config.z_channels, 1)
-        self.decoder = decoder
+        self.post_quant_conv = torch.nn.Conv2d(embed_dim, 16, 1) # Changed 512 to 16
+        # self.decoder = decoder
         self.embedding.weight.data.uniform_(-1.0 / vocab_size, 1.0 / vocab_size)
         self.lpips = LPIPS().eval() if with_lpips else None
+
+        # learned_dict = Dictionary(args.num_classes,
+        #                           (args.canvas_size // args.layer_size*2,
+        #                           args.canvas_size // args.layer_size*2),
+        #                           4, bottleneck_size=args.dim_z)
+        # learned_dict.to(device)
 
     def __repr__(self) -> str:
         return "tokenizer"
@@ -64,7 +75,8 @@ class Tokenizer(nn.Module):
             x = self.preprocess_input(x)
         shape = x.shape  # (..., C, H, W)
         x = x.view(-1, *shape[-3:])
-        z = self.encoder(x)
+        z = self.encoder_decoder_model(model_type = "encoder", im = x)
+        # z = self.encoder(x)
         z = self.pre_quant_conv(z)
         b, e, h, w = z.shape
         z_flattened = rearrange(z, 'b e h w -> (b h w) e')
@@ -72,19 +84,26 @@ class Tokenizer(nn.Module):
 
         tokens = dist_to_embeddings.argmin(dim=-1)
         z_q = rearrange(self.embedding(tokens), '(b h w) e -> b e h w', b=b, e=e, h=h, w=w).contiguous()
+        # print(z.shape)
 
         # Reshape to original
-        z = z.reshape(*shape[:-3], *z.shape[1:])
-        z_q = z_q.reshape(*shape[:-3], *z_q.shape[1:])
+        # z = z.reshape(*shape[:-3], *z.shape[1:])
+        # z_q = z_q.reshape(*shape[:-3], *z_q.shape[1:])
+
+        z = z.reshape(2, *z.shape[1:])
+        z_q = z_q.reshape(2, *z_q.shape[1:])
+
         tokens = tokens.reshape(*shape[:-3], -1)
 
         return TokenizerEncoderOutput(z, z_q, tokens)
 
-    def decode(self, z_q: torch.Tensor, should_postprocess: bool = False) -> torch.Tensor:
+    # decode should take in og image (x) and the tokens (z_q)
+    def decode(self, x, z_q: torch.Tensor, should_postprocess: bool = False) -> torch.Tensor:
         shape = z_q.shape  # (..., E, h, w)
         z_q = z_q.view(-1, *shape[-3:])
         z_q = self.post_quant_conv(z_q)
-        rec = self.decoder(z_q)
+        rec = self.encoder_decoder_model(im = x, z_q = z_q)
+        # rec = self.decoder(x, z_q)
         rec = rec.reshape(*shape[:-3], *rec.shape[1:])
         if should_postprocess:
             rec = self.postprocess_output(rec)
@@ -93,7 +112,13 @@ class Tokenizer(nn.Module):
     @torch.no_grad()
     def encode_decode(self, x: torch.Tensor, should_preprocess: bool = False, should_postprocess: bool = False) -> torch.Tensor:
         z_q = self.encode(x, should_preprocess).z_quantized
-        return self.decode(z_q, should_postprocess)
+        return self.decode(x, z_q, should_postprocess)
+
+    # @torch.no_grad()
+    # def encode_decode(self, x: torch.Tensor, should_preprocess: bool = False, should_postprocess: bool = False) -> torch.Tensor:
+    #     z_q = self.encode(x, should_preprocess).z_quantized
+    #     return self.forward(x)['image']
+
 
     def preprocess_input(self, x: torch.Tensor) -> torch.Tensor:
         """x is supposed to be channels first and in [0, 1]"""

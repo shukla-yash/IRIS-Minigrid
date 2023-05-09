@@ -1,3 +1,11 @@
+defaults:
+  - _self_
+  - tokenizer: default
+  - world_model: default
+  - actor_critic: default
+  - env: default
+  - datasets: default
+
 wandb:
   mode: online
   project: iris
@@ -6,18 +14,21 @@ wandb:
   group: null
   tags: null
   notes: null
+
 initialization:
   path_to_checkpoint: null
-  load_tokenizer: false
-  load_world_model: false
-  load_actor_critic: false
+  load_tokenizer: False
+  load_world_model: False
+  load_actor_critic: False
+
 common:
   epochs: 600
   device: cuda:0
-  do_checkpoint: true
+  do_checkpoint: True
   seed: 0
   sequence_length: ${world_model.max_blocks}
-  resume: false
+  resume: False # set by resume.sh script only.
+
 collection:
   train:
     num_envs: 1
@@ -25,7 +36,7 @@ collection:
     num_episodes_to_save: 10
     config:
       epsilon: 0.01
-      should_sample: true
+      should_sample: True
       temperature: 1.0
       num_steps: 200
       burn_in: ${training.actor_critic.burn_in}
@@ -34,18 +45,15 @@ collection:
     num_episodes_to_save: ${collection.train.num_episodes_to_save}
     config:
       epsilon: 0.0
-      should_sample: true
+      should_sample: True
       temperature: 0.5
       num_episodes: 16
       burn_in: ${training.actor_critic.burn_in}
+
 training:
-  should: true
+  should: True
   learning_rate: 0.0001
-  sampling_weights:
-  - 0.125
-  - 0.125
-  - 0.25
-  - 0.5
+  sampling_weights: [0.125, 0.125, 0.25, 0.5]
   tokenizer:
     batch_num_samples: 256
     grad_acc_steps: 1
@@ -70,13 +78,14 @@ training:
     gamma: 0.995
     lambda_: 0.95
     entropy_weight: 0.001
+
 evaluation:
-  should: true
+  should: True
   every: 5
   tokenizer:
     batch_num_samples: ${training.tokenizer.batch_num_samples}
     start_after_epochs: ${training.tokenizer.start_after_epochs}
-    save_reconstructions: true
+    save_reconstructions: True
   world_model:
     batch_num_samples: ${training.world_model.batch_num_samples}
     start_after_epochs: ${training.world_model.start_after_epochs}
@@ -84,72 +93,3 @@ evaluation:
     num_episodes_to_save: ${training.actor_critic.batch_num_samples}
     horizon: ${training.actor_critic.imagine_horizon}
     start_after_epochs: ${training.actor_critic.start_after_epochs}
-tokenizer:
-  _target_: models.tokenizer.Tokenizer
-  vocab_size: 512
-  embed_dim: 512
-  encoder:
-    _target_: models.tokenizer.Encoder
-    config:
-      _target_: models.tokenizer.EncoderDecoderConfig
-      resolution: 64
-      in_channels: 3
-      z_channels: 512
-      ch: 64
-      ch_mult:
-      - 1
-      - 1
-      - 1
-      - 1
-      - 1
-      num_res_blocks: 2
-      attn_resolutions:
-      - 8
-      - 16
-      out_ch: 3
-      dropout: 0.0
-  decoder:
-    _target_: models.tokenizer.Decoder
-    config: ${..encoder.config}
-world_model:
-  _target_: models.TransformerConfig
-  tokens_per_block: 17
-  max_blocks: 20
-  attention: causal
-  num_layers: 10
-  num_heads: 4
-  embed_dim: 256
-  embed_pdrop: 0.1
-  resid_pdrop: 0.1
-  attn_pdrop: 0.1
-actor_critic:
-  use_original_obs: false
-env:
-  train:
-    _target_: envs.make_atari
-    id: null
-    size: 64
-    max_episode_steps: 20000
-    noop_max: 30
-    frame_skip: 4
-    done_on_life_loss: true
-    clip_reward: false
-  test:
-    _target_: ${..train._target_}
-    id: MiniGrid-DoorKey-6x6-v0
-    size: ${..train.size}
-    max_episode_steps: 500
-    noop_max: 1
-    frame_skip: ${..train.frame_skip}
-    done_on_life_loss: false
-    clip_reward: false
-  keymap: atari/${.train.id}
-datasets:
-  train:
-    _target_: dataset.EpisodesDatasetRamMonitoring
-    max_ram_usage: 30G
-    name: train_dataset
-  test:
-    _target_: dataset.EpisodesDataset
-    max_num_episodes: null
-    name: test_dataset
